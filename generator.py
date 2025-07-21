@@ -215,7 +215,8 @@ def export_live_channels(kablo_data, rectv_channels):
             {"category_id": 5, "category_name": "Belgesel", "parent_id": 0, "category_type": "live"},
             {"category_id": 6, "category_name": "Müzik", "parent_id": 0, "category_type": "live"},
             {"category_id": 7, "category_name": "Genel", "parent_id": 0, "category_type": "live"},
-            {"category_id": 8, "category_name": "Diğer", "parent_id": 0, "category_type": "live"}
+            {"category_id": 8, "category_name": "Bilgilendirme", "parent_id": 0, "category_type": "live"},
+            {"category_id": 9, "category_name": "Diğer", "parent_id": 0, "category_type": "live"}
         ],
         "streams": [],
         "last_updated": datetime.now().isoformat()
@@ -223,7 +224,7 @@ def export_live_channels(kablo_data, rectv_channels):
     
     category_mapping = {
         "Spor": 1, "Haber": 2, "Ulusal": 3, "Sinema": 4,
-        "Belgesel": 5, "Müzik": 6, "Genel": 7, "Diğer": 8
+        "Belgesel": 5, "Müzik": 6, "Genel": 7, "Bilgilendirme": 8, "Diğer": 9
     }
     
     stream_id = 1
@@ -235,20 +236,33 @@ def export_live_channels(kablo_data, rectv_channels):
         for channel in channels:
             name = channel.get('Name')
             stream_data = channel.get('StreamData', {})
-            hls_url = stream_data.get('HlsStreamUrl') if stream_data else None
-            logo = channel.get('PrimaryLogoImageUrl', '')
-            categories_list = channel.get('Categories', [])
             channel_uid = channel.get('UId')
+            logo = channel.get('PrimaryLogoImageUrl', '')
+            description = channel.get('Description', '')
+            categories_list = channel.get('Categories', [])
+            audio_tracks = channel.get('AudioTracks', [])
+            remote_number = channel.get('RemoteNumber', '')
             
-            if not name or not hls_url:
+            # Get stream URL - prefer HLS, fallback to DASH, then Default
+            stream_url = (stream_data.get('HlsStreamUrl') or 
+                         stream_data.get('DashStreamUrl') or 
+                         stream_data.get('DefaultStreamUrl'))
+            
+            if not name or not stream_url:
                 continue
             
             group = categories_list[0].get('Name', 'Genel') if categories_list else 'Genel'
+            category_id = category_mapping.get(group, 9)
             
-            if group == "Bilgilendirme":
-                continue
-            
-            category_id = category_mapping.get(group, 7)
+            # Prepare audio tracks info
+            audio_info = []
+            for track in audio_tracks:
+                track_info = {
+                    "code": track.get('Code', ''),
+                    "label": track.get('Label', ''),
+                    "is_default": track.get('IsDefault', False)
+                }
+                audio_info.append(track_info)
             
             export_data["streams"].append({
                 "stream_id": stream_id,
@@ -256,9 +270,12 @@ def export_live_channels(kablo_data, rectv_channels):
                 "stream_type": "live",
                 "category_id": category_id,
                 "stream_icon": logo,
-                "stream_url": hls_url,
+                "stream_url": stream_url,
                 "epg_channel_id": channel_uid or str(stream_id),
                 "thumbnail": "",
+                "description": description,
+                "remote_number": remote_number,
+                "audio_tracks": audio_info,
                 "source": "kablo"
             })
             stream_id += 1
@@ -271,7 +288,7 @@ def export_live_channels(kablo_data, rectv_channels):
         categories_list = channel.get("categories", [])
         group_title = categories_list[0]["title"] if categories_list else "Diğer"
         
-        category_id = category_mapping.get(group_title, 8)
+        category_id = category_mapping.get(group_title, 9)
         
         sources = channel.get("sources", [])
         for source in sources:
@@ -289,6 +306,9 @@ def export_live_channels(kablo_data, rectv_channels):
                     "stream_url": url,
                     "epg_channel_id": channel_id,
                     "thumbnail": "",
+                    "description": "",
+                    "remote_number": "",
+                    "audio_tracks": [],
                     "source": "rectv"
                 })
                 stream_id += 1
@@ -298,6 +318,10 @@ def export_live_channels(kablo_data, rectv_channels):
     
     print(f"✅ Live channels export: live_channels_export.json")
     print(f"📺 Live Streams: {len(export_data['streams'])}")
+
+# ============================================================================
+# VOD FUNCTIONS
+# ============================================================================
 
 def load_vod_ids(filename):
     try:
@@ -340,7 +364,8 @@ def export_vod_data(films):
             {"category_id": 107, "category_name": "Gerilim Filmleri", "parent_id": 0, "category_type": "vod"},
             {"category_id": 108, "category_name": "Animasyon", "parent_id": 0, "category_type": "vod"},
             {"category_id": 109, "category_name": "Belgesel", "parent_id": 0, "category_type": "vod"},
-            {"category_id": 110, "category_name": "Diğer Filmler", "parent_id": 0, "category_type": "vod"}
+            {"category_id": 110, "category_name": "Fantastik", "parent_id": 0, "category_type": "vod"},
+            {"category_id": 111, "category_name": "Diğer Filmler", "parent_id": 0, "category_type": "vod"}
         ],
         "streams": [],
         "last_updated": datetime.now().isoformat()
@@ -354,7 +379,8 @@ def export_vod_data(films):
         "bilim kurgu": 105, "sci-fi": 105, "science fiction": 105,
         "romantik": 106, "romance": 106, "aşk": 106,
         "animasyon": 108, "animation": 108, "çizgi film": 108,
-        "belgesel": 109, "documentary": 109
+        "belgesel": 109, "documentary": 109,
+        "fantastik": 110, "fantasy": 110
     }
     
     stream_id = 1001
@@ -363,31 +389,75 @@ def export_vod_data(films):
         title = film.get("Title", "Bilinmeyen")
         uid = film.get("UId")
         description = film.get("Description", "")
-        year = film.get("Year", "")
+        original_title = film.get("OriginalTitle", "")
+        year = film.get("ReleaseYear", "")
+        duration = film.get("Duration", 0)
         
+        # Get poster (LISTING type is best for icons)
         logo = ""
+        thumbnail = ""
         for poster in film.get("Posters", []):
-            if poster.get("Type", "").lower() == "listing":
+            poster_type = poster.get("Type", "").upper()
+            if poster_type == "LISTING":
                 logo = poster.get("ImageUrl", "")
-                break
+            elif poster_type == "PREVIEW":
+                thumbnail = poster.get("ImageUrl", "")
         
+        # Get stream URL - prefer DASH, fallback to HLS
         stream = film.get("StreamData", {})
-        mpd = stream.get("DashStreamUrl")
+        stream_url = stream.get("DashStreamUrl") or stream.get("HlsStreamUrl")
         
-        if not mpd or stream.get("IsDrmEnabled", True):
+        # No DRM check - support everything
+        if not stream_url:
             continue
         
-        # Determine category
-        category_id = 110  # Default
+        # Get audio tracks
+        audio_tracks = []
+        for track in film.get("AudioTracks", []):
+            audio_tracks.append({
+                "code": track.get("Code", ""),
+                "label": track.get("Label", "")
+            })
+        
+        # Get text tracks (subtitles)
+        text_tracks = []
+        for track in film.get("TextTracks", []):
+            text_tracks.append({
+                "code": track.get("Code", ""),
+                "label": track.get("Label", "")
+            })
+        
+        # Determine category from genres
+        category_id = 111  # Default to "Diğer Filmler"
         genres = film.get("Genres", [])
+        categories = film.get("Categories", [])
+        
+        # Check both Genres and Categories
+        all_genre_names = []
         for genre in genres:
-            genre_name = genre.get("Name", "").lower() if isinstance(genre, dict) else str(genre).lower()
+            if isinstance(genre, dict) and genre.get("Name"):
+                all_genre_names.append(genre["Name"].lower())
+        for category in categories:
+            if isinstance(category, dict) and category.get("Name"):
+                all_genre_names.append(category["Name"].lower())
+        
+        # Find matching category
+        for genre_name in all_genre_names:
             for key, cat_id in genre_mapping.items():
                 if key in genre_name:
                     category_id = cat_id
                     break
-            if category_id != 110:
+            if category_id != 111:
                 break
+        
+        # Get cast info for additional metadata
+        director = ""
+        cast = []
+        for person in film.get("Cast", []):
+            if person.get("Type") == "DIRECTOR":
+                director = person.get("Name", "")
+            elif person.get("Type") == "ACTOR":
+                cast.append(person.get("Name", ""))
         
         export_data["streams"].append({
             "stream_id": stream_id,
@@ -395,10 +465,16 @@ def export_vod_data(films):
             "stream_type": "movie",
             "category_id": category_id,
             "stream_icon": logo,
-            "stream_url": mpd,
+            "stream_url": stream_url,
             "description": description,
+            "original_title": original_title,
             "year": year,
-            "thumbnail": "",
+            "duration": duration,
+            "director": director,
+            "cast": ", ".join(cast[:5]),  # Limit to first 5 actors
+            "audio_tracks": audio_tracks,
+            "text_tracks": text_tracks,
+            "thumbnail": thumbnail,
             "added": int(time.time()),
             "source": "kablo_vod"
         })
